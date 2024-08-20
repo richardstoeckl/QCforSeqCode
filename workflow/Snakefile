@@ -1,0 +1,182 @@
+"""
+
+Copyright Richard Stöckl 2024.
+Distributed under the Boost Software License, Version 1.0.
+(See accompanying file LICENSE or copy at 
+https://www.boost.org/LICENSE_1_0.txt)
+
+"""
+
+import pandas as pd
+import re
+import os
+import glob
+from pathlib import Path
+from snakemake.utils import validate
+from snakemake.utils import min_version
+
+########## check minimum snakemake version ##########
+min_version("8.10.0")
+
+########## load config and sample sheets ##########
+
+
+configfile: os.path.join(workflow.basedir, "../", "config", "config.yaml")
+sampleData = os.path.join(workflow.basedir, "../", "config", config["main"]["sampleData"])
+
+sampleDF = pd.read_csv(sampleData, sep=",").set_index("sampleID", drop=False)
+SAMPLES = sampleDF.sampleID.to_list()
+
+
+LOGPATH = os.path.normpath(config["main"]["logPath"])
+INTERIMPATH = os.path.normpath(config["main"]["interimPath"])
+RESULTPATH = os.path.normpath(config["main"]["resultPath"])
+
+rule all:
+    input:
+        expand(
+            os.path.join(INTERIMPATH, "flags", "{sampleID}", "collectAll.flag"),
+            sampleID=SAMPLES,
+        ),
+
+# Get the number of contigs (=num_seqs) , N50, and length of the largest contig (=max_len)
+checkpoint seqkit_stats:
+    input:
+        assembly=lookup(
+                    query="sampleID == '{sampleID}'",
+                    within=sampleDF,
+                    cols="pathToAssemblyFasta",
+                ),
+    output:
+        os.path.join(RESULTPATH,"seqkit-stats","{sampleID}_assembly.tsv")
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    shell:
+        """
+        seqkit stats --tabular {input.assembly} > {output}
+        """
+
+# helper function to get a temporary directory with all of the assemblies in one dir, as some tools require this
+rule collectAssemblies:
+    input:
+        assembly=lookup(
+            query="sampleID == '{sampleID}'",
+            within=sampleDF,
+            cols="pathToAssemblyFasta",
+        ),
+    output:
+        assemblyCollected=os.path.join(RESULTPATH,"collected","{sampleID}.fasta"),
+    threads: 1
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    shell:
+        """
+        seqkit seq {input.assembly} > {output.assemblyCollected}
+        """
+
+# check completeness, contamination, and also N50
+rule checkm2:
+    input:
+        assembly=expand(rules.collectAssemblies.output, sampleID=SAMPLES)
+    output:
+        os.path.join(RESULTPATH,"checkm2","{sampleID}","quality_report.tsv")
+    log:
+        os.path.join(config["main"]["logPath"], "{sampleID}", "logs", "{sampleID}_checkm2.log"),
+    threads:
+        workflow.cores * 1
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    params:
+        dbpath=os.path.join(config["tools"]["checkm2"]["dbpath"], "uniref100.KO.1.dmnd"),
+        outDir=lambda w, output:os.path.split(os.path.splitext(output[0])[0])[0],
+        genomeDir=lambda w, input:os.path.split(os.path.splitext(input[0])[0])[0]
+    shell:
+        """
+        checkm2 predict -i {params.genomeDir} -o {params.outDir} --database_path {params.dbpath} -x '.fasta' --force -t {threads} >{log} 2>&1
+        """
+
+# whole genome taxonomic classification
+rule gtdbtk:
+    input:
+        assembliesCollected=expand(rules.collectAssemblies.output, sampleID=SAMPLES)
+    output:
+        directory(os.path.join(RESULTPATH,"gtdbtk","{sampleID}")),
+    log:
+        os.path.join(config["main"]["logPath"], "{sampleID}", "logs", "{sampleID}_gtdbtk.log"),
+    params:
+        inputDir=os.path.join(RESULTPATH,"collected"),
+        dbpath=os.path.join(config["tools"]["gtdbtk"]["dbpath"]),
+    retries: 2
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    shell:
+        """
+        conda env config vars set GTDBTK_DATA_PATH={params.dbpath}
+        gtdbtk classify_wf --cpus {threads} --skip_ani_screen --force --genome_dir {params.inputDir} --extension 'fasta' --out_dir {output} >{log} 2>&1
+        """
+
+# to compare the whole genome taxonomic classification with the 16S rRNA gene classification,
+# we first need to extract the 16S rRNA gene sequences from the assemblies
+
+# download 16S rRNA gene database from Rfam
+rule prepare16SrRNAdb:
+    output:
+        cm=os.path.join(config["tools"]["infernal"]["dbpath"], "16SrRNA.cm"),
+        i1m=os.path.join(config["tools"]["infernal"]["dbpath"], "16SrRNA.cm.i1m"),
+        i1i=os.path.join(config["tools"]["infernal"]["dbpath"], "16SrRNA.cm.i1i"),
+        i1f=os.path.join(config["tools"]["infernal"]["dbpath"], "16SrRNA.cm.i1f"),
+        i1p=os.path.join(config["tools"]["infernal"]["dbpath"], "16SrRNA.cm.i1p"),
+    log:
+        os.path.join(config["main"]["logPath"], "prepare16SrRNAdb.log"),
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    shadow: "copy-minimal"
+    shell:
+        """
+        wget -O SSU_rRNA_bacteria.cm https://rfam.org/family/RF00177/cm
+        wget -O SSU_rRNA_archaea.cm https://rfam.org/family/RF01959/cm
+        cat SSU_rRNA_bacteria.cm SSU_rRNA_archaea.cm > {output.cm}
+        cmpress {output.cm} > {log} 2>&1
+        """
+
+# helper functions to get the rough genome size (unfortunately including plasmids, but that should be fine)
+def get_sum_length(sampleID):
+    with checkpoints.seqkit_stats.get(sampleID=sampleID).output[0].open() as file:
+        df = pd.read_csv(file, sep="\t")
+        sum_len = df["sum_len"].values[0]
+    return sum_len
+
+rule infernal:
+    input:
+        assembly=lookup(
+            query="sampleID == '{sampleID}'",
+            within=sampleDF,
+            cols="pathToAssemblyFasta",
+        ),
+        prepare16SrRNAdb=rules.prepare16SrRNAdb.output.cm,
+        seqkit_stats= lambda wildcards: checkpoints.seqkit_stats.get(sampleID=wildcards.sampleID).output,
+    output:
+        rRNAFasta=os.path.join(RESULTPATH,"infernal","{sampleID}_16S_rRNA.fasta"),
+        tblout=os.path.join(RESULTPATH,"infernal","{sampleID}.tblout"),
+        bed=os.path.join(RESULTPATH,"infernal","{sampleID}.bed"),
+    log:
+        os.path.join(config["main"]["logPath"], "{sampleID}", "logs", "{sampleID}_infernal.log"),
+    threads:
+        workflow.cores * 0.5
+    params:
+        zValue=lambda w: 2 * get_sum_length(w.sampleID) // 1000000
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    shell:
+        # first, use infernals cmscan to find the 16S rRNA gene
+        # then format the cmscan output using awk:
+        # 1. remove all lines starting with #
+        # 2. only keep lines where the 20th column (the “olp” or "overlap" column) is "="
+        # 3. convert to bed format but if the strand is "-", switch the seq from and seq to columns
+        # 4. sort by score in descending order and get the top hit
+        # finally, use seqkit to extract the sequence from the assembly
+        """
+        cmscan --noali --cut_tc -g --fmt 2 --nohmmonly --rfam --cpu {threads} --tblout {output.tblout} {input.prepare16SrRNAdb} {input.assembly} >{log} 2>&1
+        awk '!/^#/ && $20 == "=" {{print}}' {output.tblout}  | awk 'BEGIN{{OFS="\t"}} {{if ($12 == "-") {{print $4, $11, $10, $2, $17, $12}} else {{print $4, $10, $11, $2, $17, $12}}}}' | sort -k5,5nr | head -n 1 > {output.bed}
+        seqkit subseq --bed {output.bed} {input.assembly} > {output.rRNAFasta}
+        """
