@@ -1,0 +1,3 @@
+sampleID,pathToAssemblyFasta,pathToSequencingReadsFastq,comment
+Pfu,"data/GCF_000007305.1_ASM730v1_genomic.fna","data/SRR8767914_subsampled.fastq.gz","This is the reference genome of Pyrococcus furiosus, which does fit the criteria of SeqCode"
+Tpa,"data/GCA_015662175.1_ASM1566217v1_genomic.fna","data/SRR8767914_subsampled.fastq.gz","This is the assembly of Thermococcus paralvinellae, which does not fit the criteria of SeqCode"

@@ -34,10 +34,7 @@ RESULTPATH = os.path.normpath(config["main"]["resultPath"])
 
 rule all:
     input:
-        expand(
-            os.path.join(INTERIMPATH, "flags", "{sampleID}", "collectAll.flag"),
-            sampleID=SAMPLES,
-        ),
+        os.path.join(RESULTPATH,"final_report.html"),
 
 # Get the number of contigs (=num_seqs) , N50, and length of the largest contig (=max_len)
 checkpoint seqkit_stats:
@@ -53,7 +50,7 @@ checkpoint seqkit_stats:
         os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
     shell:
         """
-        seqkit stats --tabular {input.assembly} > {output}
+        seqkit stats --all --tabular {input.assembly} > {output}
         """
 
 # helper function to get a temporary directory with all of the assemblies in one dir, as some tools require this
@@ -65,7 +62,7 @@ rule collectAssemblies:
             cols="pathToAssemblyFasta",
         ),
     output:
-        assemblyCollected=os.path.join(RESULTPATH,"collected","{sampleID}.fasta"),
+        assemblyCollected=os.path.join(INTERIMPATH,"collected","{sampleID}.fasta"),
     threads: 1
     conda:
         os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
@@ -79,9 +76,9 @@ rule checkm2:
     input:
         assembly=expand(rules.collectAssemblies.output, sampleID=SAMPLES)
     output:
-        os.path.join(RESULTPATH,"checkm2","{sampleID}","quality_report.tsv")
+        os.path.join(RESULTPATH,"checkm2","quality_report.tsv")
     log:
-        os.path.join(config["main"]["logPath"], "{sampleID}", "logs", "{sampleID}_checkm2.log"),
+        os.path.join(LOGPATH, "common", "logs", "checkm2.log"),
     threads:
         workflow.cores * 1
     conda:
@@ -100,19 +97,30 @@ rule gtdbtk:
     input:
         assembliesCollected=expand(rules.collectAssemblies.output, sampleID=SAMPLES)
     output:
-        directory(os.path.join(RESULTPATH,"gtdbtk","{sampleID}")),
+        directory(os.path.join(INTERIMPATH,"gtdbtk")),
     log:
-        os.path.join(config["main"]["logPath"], "{sampleID}", "logs", "{sampleID}_gtdbtk.log"),
+        os.path.join(LOGPATH, "common", "logs", "gtdbtk.log"),
     params:
-        inputDir=os.path.join(RESULTPATH,"collected"),
+        inputDir=lambda w, input:os.path.split(os.path.splitext(input[0])[0])[0],
         dbpath=os.path.join(config["tools"]["gtdbtk"]["dbpath"]),
-    retries: 2
+    retries: 2 # this is necessary because the conda env var needs to be set
     conda:
         os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
     shell:
         """
         conda env config vars set GTDBTK_DATA_PATH={params.dbpath}
         gtdbtk classify_wf --cpus {threads} --skip_ani_screen --force --genome_dir {params.inputDir} --extension 'fasta' --out_dir {output} >{log} 2>&1
+        """
+
+# helper function to get all of the gtdbtk classification files, as they might be split between archaea and bacteria
+rule collectGtdbtk:
+    input:
+        gtdbtk=rules.gtdbtk.output
+    output:
+        os.path.join(RESULTPATH,"gtdbtk","gtdbtk_taxonomy.tsv"),
+    shell:
+        """
+        cat {input.gtdbtk}/*.summary.tsv > {output}
         """
 
 # to compare the whole genome taxonomic classification with the 16S rRNA gene classification,
@@ -127,7 +135,7 @@ rule prepare16SrRNAdb:
         i1f=os.path.join(config["tools"]["infernal"]["dbpath"], "16SrRNA.cm.i1f"),
         i1p=os.path.join(config["tools"]["infernal"]["dbpath"], "16SrRNA.cm.i1p"),
     log:
-        os.path.join(config["main"]["logPath"], "prepare16SrRNAdb.log"),
+        os.path.join(LOGPATH, "prepare16SrRNAdb.log"),
     conda:
         os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
     shadow: "copy-minimal"
@@ -146,6 +154,7 @@ def get_sum_length(sampleID):
         sum_len = df["sum_len"].values[0]
     return sum_len
 
+# 16S rRNA gene prediction as implemented in bakta: https://github.com/oschwengers/bakta/blob/a7ac1c8641cf8a11888b0295c30f0b2e0b8f34fa/bakta/features/r_rna.py#L29
 rule infernal:
     input:
         assembly=lookup(
@@ -156,11 +165,11 @@ rule infernal:
         prepare16SrRNAdb=rules.prepare16SrRNAdb.output.cm,
         seqkit_stats= lambda wildcards: checkpoints.seqkit_stats.get(sampleID=wildcards.sampleID).output,
     output:
-        rRNAFasta=os.path.join(RESULTPATH,"infernal","{sampleID}_16S_rRNA.fasta"),
-        tblout=os.path.join(RESULTPATH,"infernal","{sampleID}.tblout"),
-        bed=os.path.join(RESULTPATH,"infernal","{sampleID}.bed"),
+        rRNAFasta=os.path.join(INTERIMPATH,"infernal","{sampleID}_16S_rRNA.fasta"),
+        tblout=os.path.join(INTERIMPATH,"infernal","{sampleID}.tblout"),
+        bed=os.path.join(INTERIMPATH,"infernal","{sampleID}.bed"),
     log:
-        os.path.join(config["main"]["logPath"], "{sampleID}", "logs", "{sampleID}_infernal.log"),
+        os.path.join(LOGPATH, "{sampleID}", "logs", "{sampleID}_infernal.log"),
     threads:
         workflow.cores * 0.5
     params:
@@ -178,5 +187,155 @@ rule infernal:
         """
         cmscan --noali --cut_tc -g --fmt 2 --nohmmonly --rfam --cpu {threads} --tblout {output.tblout} {input.prepare16SrRNAdb} {input.assembly} >{log} 2>&1
         awk '!/^#/ && $20 == "=" {{print}}' {output.tblout}  | awk 'BEGIN{{OFS="\t"}} {{if ($12 == "-") {{print $4, $11, $10, $2, $17, $12}} else {{print $4, $10, $11, $2, $17, $12}}}}' | sort -k5,5nr | head -n 1 > {output.bed}
-        seqkit subseq --bed {output.bed} {input.assembly} > {output.rRNAFasta}
+        seqkit subseq --bed {output.bed} {input.assembly} | seqkit replace -p .+ -r "{wildcards.sampleID}" > {output.rRNAFasta}
+        """
+
+# helper function to concatenate all 16S rRNA gene sequences into one fasta file
+rule concatFasta:
+    input:
+        rRNAFasta=expand(rules.infernal.output.rRNAFasta, sampleID=SAMPLES)
+    output:
+        os.path.join(INTERIMPATH,"infernal","16S_rRNA_combined.fasta"),
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    shell:
+        """
+        seqkit seq {input.rRNAFasta} > {output}
+        """
+
+# get the training data for decipher
+rule downloadDecipherDB:
+    output:
+        db=os.path.join(INTERIMPATH,"DECIPHER", "SILVA_SSU_r138_2019.RData"),
+    log:
+        os.path.join(LOGPATH, "common", "logs", "downloadDecipherDB.log"),
+    shell:
+        """
+        wget -O {output.db} http://www2.decipher.codes/Classification/TrainingSets/SILVA_SSU_r138_2019.RData >{log} 2>&1
+        """
+
+# 16S rRNA gene taxonomic classification to compare to the whole genome classification
+rule decipher:
+    input:
+        rRNAFasta=rules.concatFasta.output,
+        db=rules.downloadDecipherDB.output.db
+    output:
+        os.path.join(RESULTPATH,"decipher","16S_rRNA_taxonomy.tsv"),
+    log:
+        os.path.join(LOGPATH, "common", "logs", "decipher.log"),
+    threads:
+        workflow.cores * 0.25
+    conda:
+        os.path.join(workflow.basedir, "envs","r-tools.yaml"),
+    params:
+        script=os.path.join(workflow.basedir, "scripts", "decipher.R"),
+    shell:
+        """
+        Rscript {params.script} {input.db} {input.rRNAFasta} {threads} {output} >{log} 2>&1
+        """
+
+# tRNA prediction
+rule trnascan:
+    input:
+        assembly=lookup(
+            query="sampleID == '{sampleID}'",
+            within=sampleDF,
+            cols="pathToAssemblyFasta",
+        ),
+    output:
+        os.path.join(RESULTPATH,"trnascan","{sampleID}.txt"),
+    log:
+        os.path.join(LOGPATH, "{sampleID}", "logs", "{sampleID}_trnascan.log"),
+    threads:
+        workflow.cores * 0.25
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
+    shell:
+        """
+        tRNAscan-SE --forceow -G -o {output} --thread {threads} --log {log} {input.assembly}
+        """
+
+# for the coverage calculation, we need to map the reads to the assembly. But first we need to decide the mapping mode of minimap2.
+# So we check if the reads are sort of short with seqkit stats.
+checkpoint seqkit_stats_reads:
+    input:
+        reads=lookup(
+            query="sampleID == '{sampleID}'",
+            within=sampleDF,
+            cols="pathToSequencingReadsFastq",
+        ),
+    output:
+        os.path.join(INTERIMPATH,"seqkit-stats","{sampleID}_reads.tsv")
+    conda:
+        os.path.join(workflow.basedir, "envs","withReads.yaml")
+    shell:
+        """
+        seqkit stats --tabular {input.reads} > {output}
+        """
+
+# helper function to get the average read length
+def get_avg_read_length(sampleID):
+    with checkpoints.seqkit_stats_reads.get(sampleID=sampleID).output[0].open() as file:
+        df = pd.read_csv(file, sep="\t")
+        avg_len = df["avg_len"].values[0]
+    return avg_len
+
+# mapping the reads to the assembly and calculating the coverage
+rule minimap:
+    input:
+        assembly=lookup(
+            query="sampleID == '{sampleID}'",
+            within=sampleDF,
+            cols="pathToAssemblyFasta",
+        ),
+        reads=lookup(
+            query="sampleID == '{sampleID}'",
+            within=sampleDF,
+            cols="pathToSequencingReadsFastq",
+        ),
+        readStats=lambda wildcards: checkpoints.seqkit_stats_reads.get(sampleID=wildcards.sampleID).output
+    output:
+        bam=os.path.join(INTERIMPATH, "minimap", "{sampleID}.bam"),
+        coverage=os.path.join(INTERIMPATH, "minimap", "{sampleID}_coverage.txt"),
+    threads: workflow.cores * 0.5
+    log:
+        os.path.join(LOGPATH, "{sampleID}", "logs", "{sampleID}_minimap.log"),
+    conda:
+        os.path.join(workflow.basedir, "envs","withReads.yaml")
+    params:
+        mappingMode= lambda w: "map-ont" if get_avg_read_length(w.sampleID) > 1000 else "sr"
+    shell:
+        """
+        minimap2 -t {threads} -ax {params.mappingMode} {input.assembly} {input.reads} 2>{log} | \
+        samtools view -@ {threads}/2 -b 2>>{log} | \
+        samtools sort -@ {threads}/2 > {output.bam} 2>>{log} && \
+        samtools index {output.bam} 2>>{log} && \
+        samtools coverage -d 0 {output.bam} > {output.coverage} 2>>{log}
+        """
+
+rule createReport:
+    input:
+        checkm2=rules.checkm2.output,
+        seqkit_stats=expand(rules.seqkit_stats.output, sampleID=SAMPLES),
+        gtdbtk=rules.collectGtdbtk.output,
+        infernal=expand(rules.infernal.output, sampleID=SAMPLES),
+        minimap=expand(rules.minimap.output.bam, sampleID=SAMPLES),
+        samtools=expand(rules.minimap.output.coverage, sampleID=SAMPLES),
+        trnascan=expand(rules.trnascan.output, sampleID=SAMPLES),
+        decipher=rules.decipher.output,
+    output:
+        report=os.path.join(RESULTPATH,"final_report.html"),
+    log:
+        os.path.join(LOGPATH, "common", "logs", "createReport.log"),
+    params:
+        script=os.path.join(workflow.basedir, "scripts", "createReport.R"),
+        checkm2_dir=lambda w, input:os.path.split(os.path.splitext(input.checkm2[0])[0])[0],
+        seqkit_stats_dir=lambda w, input:os.path.split(os.path.splitext(input.seqkit_stats[0])[0])[0],
+        samtools_coverage_dir=lambda w, input:os.path.split(os.path.splitext(input.samtools[0])[0])[0],
+        tRNAscan_dir=lambda w, input:os.path.split(os.path.splitext(input.trnascan[0])[0])[0],
+    conda:
+        os.path.join(workflow.basedir, "envs","r-tools.yaml")
+    shell:
+        """
+        Rscript {params.script} {input.checkm2} {params.seqkit_stats_dir} {params.samtools_coverage_dir} {input.gtdbtk} {input.decipher} {params.tRNAscan_dir} {output} >{log} 2>&1
         """
