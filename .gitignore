@@ -2,5 +2,6 @@ logs/*
 results/*
 data/*
 interim/*
+.snakemake/*
 .snakemake/*.tests/unit/decipher/data/interim/DECIPHER/SILVA_SSU_r138_2019.RData
 .tests/unit/downloadDecipherDB/expected/interim/DECIPHER/SILVA_SSU_r138_2019.RData
