@@ -1,5 +1,5 @@
 main:
-    sampleData: "sampleData.csv" # "config/sampleData_tests.csv is the sample file that can be used for testing the pipeline setup"
+    sampleData: "sampleData.csv" # "config/sampleData.csv is the sample file that can be used for testing the pipeline setup"
     logPath: "logs/"
     interimPath: "interim/"
     resultPath: "results/"
