@@ -41,6 +41,24 @@ snakemake --sdm conda --cores
 - automate checkm2 and gtdb-tk database downloads
 - add checks if the config file and the sample file are correctly filled
 
+## Tools used in the pipeline and reasoning. Please cite these tools if you use this pipeline.
+- **Taxonomy**
+    - **[GTDB-Tk v2.4.0](https://github.com/Ecogenomics/GTDBTk/) - toolkit for assigning objective taxonomic classifications to bacterial and archaeal genomes.** *Used to get full genome taxonomic classification.*
+    - **[Infernal v1.1.5](https://github.com/EddyRivasLab/infernal) - RNA secondary structure/sequence profiles for homology search and alignment.** *Used to find and extract rRNA genes in the genomes.*
+    - **[DECIPHER v2.30.0](https://doi.org/doi:10.18129/B9.bioc.DECIPHER) - Tools for curating, analyzing, and manipulating biological sequences.** *Used to get 16S rRNA gene taxonomic classification by comparing to SILVA db.*
+    - **[SILVA r138](https://www.arb-silva.de/) - rRNA database.** *Used as source of rRNA gene taxonomy*
+- **Contamination and Completeness**
+    - **[CheckM2 v1.0.1](https://github.com/chklovski/CheckM2/) - Assessing the quality of metagenome-derived genome bins using machine learning.** *Used to get completeness and contamination stats.* Unlike CheckM1 (one of the most popular tools for completeness and contamination prediction), CheckM2 has universally trained machine learning models it applies regardless of taxonomic lineage. This allows it to work better with organisms that have only few known representative genomes.
+- **tRNA gene occurence**
+    - **[tRNAscan-SE v2.0.12](https://github.com/UCSC-LoweLab/tRNAscan-SE) - An improved tool for transfer RNA detection.** *Used to find tRNA genes in the genomes.*
+- **General stats, file manipulation, alignment, and reporting**
+    - **[seqkit v2.8.2](https://github.com/shenwei356/seqkit) - ultrafast toolkit for FASTA/Q file manipulation.** *Used for quick and easy general stat gathering and sequence concatination.*
+    - **[minimap2 v2.28](https://github.com/lh3/minimap2) - versatile pairwise aligner for genomic and spliced nucleotide sequences.** *Used to align sequencing reads to assembly to get coverage stats.*
+    - **[samtools v1.20](https://github.com/samtools/samtools) - Tools for manipulating next-generation sequencing data** *Used to calculate coverage stats.*
+    - **[tidyverse v2.0.0](https://github.com/tidyverse) - R packages for data science** *Used for general data manipulation for reporting*
+    - **[fs v1.6.4](https://github.com/r-lib/fs/) - cross platform file operations** *Used for file manipulation for reporting*
+    - **[tinytable v0.4.0](https://github.com/vincentarelbundock/tinytable) - Simple and Customizable Tables** *Used to generate the final report*
+
 
 ## Notes on the Test data:
 - `data/GCF_000007305.1_ASM730v1_genomic.fna` - This is the reference genome of Pyrococcus furiosus, which does fit the criteria of SeqCode. It was acquired from the [RefSeq database](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_000007305.1/).
