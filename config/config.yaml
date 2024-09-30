@@ -3,6 +3,7 @@ main:
     logPath: "logs/"
     interimPath: "interim/"
     resultPath: "results/"
+    prefix: "veryImportantSamples" # this prefix will be used to name the final report file
 
 tools:
     checkm2:

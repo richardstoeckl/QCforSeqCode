@@ -29,7 +29,8 @@ samtools_coverage_path <- args[3]
 gtdbtk_path <- args[4]
 decipher_path <- args[5]
 tRNAscan_path <- args[6]
-outfileReport <- args[7]
+outfileReportHTML <- args[7]
+outfileReportTSV <- args[8]
 
 # checkm2
 checkm2 <- read_tsv(checkm2_path) %>%
@@ -192,6 +193,8 @@ style_table <- function(combinedDF) {
 tab <- style_table(combinedDF)
 tab
 
-save_tt(tab, outfileReport, overwrite = TRUE)
+save_tt(tab, outfileReportHTML, overwrite = TRUE)
+
+write_tsv(combinedDF, outfileReportTSV)
 
 
