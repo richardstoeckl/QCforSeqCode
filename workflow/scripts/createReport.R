@@ -84,6 +84,10 @@ combinedDF <- checkm2 %>%
     left_join(gtdbtk %>% select(`Sample ID`, "GTDB-Tk family"=Family, "GTDB-Tk genus"=Genus), by = join_by(assembly == `Sample ID`)) %>%
     left_join(decipher %>% select(sample, "SILVA family"=family,"SILVA genus"=genus), by = join_by(assembly == sample)) %>%
     left_join(tRNAscan, by = join_by(assembly == assembly)) %>%
+    mutate("GTDB-Tk family"=ifelse(is.na(`GTDB-Tk family`), "UNCLASSIFIED", `GTDB-Tk family`),
+        "GTDB-Tk genus"=ifelse(is.na(`GTDB-Tk genus`), "UNCLASSIFIED", `GTDB-Tk genus`),
+        "SILVA family"=ifelse(is.na(`SILVA family`), "UNCLASSIFIED", `SILVA family`),
+        "SILVA genus"=ifelse(is.na(`SILVA genus`), "UNCLASSIFIED", `SILVA genus`)) %>%
     select("Sample ID"=assembly, 
            Completeness, 
            Contamination,
@@ -146,6 +150,18 @@ style_table <- function(combinedDF) {
     }
     if (any(combinedDF$`GTDB-Tk genus` != combinedDF$`SILVA genus`)) {
         tab <- style_tt(tab, i = which(combinedDF$`GTDB-Tk genus` != combinedDF$`SILVA genus`), j = c("GTDB-Tk genus","SILVA genus"), background = "yellow", color = "black")
+    }
+    if (any(combinedDF$`GTDB-Tk genus` == "UNCLASSIFIED")) {
+        tab <- style_tt(tab, i = which(combinedDF$`GTDB-Tk genus` == "UNCLASSIFIED"), j = "GTDB-Tk genus", color = "orange")
+    }
+    if (any(combinedDF$`GTDB-Tk family` == "UNCLASSIFIED")) {
+        tab <- style_tt(tab, i = which(combinedDF$`GTDB-Tk family` == "UNCLASSIFIED"), j = "GTDB-Tk family", color = "orange")
+    }
+    if (any(combinedDF$`SILVA genus` == "UNCLASSIFIED")) {
+        tab <- style_tt(tab, i = which(combinedDF$`SILVA genus` == "UNCLASSIFIED"), j = "SILVA genus", color = "orange")
+    }
+    if (any(combinedDF$`SILVA family` == "UNCLASSIFIED")) {
+        tab <- style_tt(tab, i = which(combinedDF$`SILVA family` == "UNCLASSIFIED"), j = "SILVA family", color = "orange")
     }
     if (any(combinedDF$`tRNA count` < 18)) {
         tab <- style_tt(tab, i = which(combinedDF$`tRNA count` < 18), j = "tRNA count", background = "orange", color = "white")
