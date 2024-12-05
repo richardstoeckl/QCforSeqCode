@@ -211,7 +211,7 @@ rule downloadDecipherDB:
         os.path.join(LOGPATH, "common", "logs", "downloadDecipherDB.log"),
     shell:
         """
-        wget -O {output.db} http://www2.decipher.codes/Classification/TrainingSets/SILVA_SSU_r138_2019.RData >{log} 2>&1
+        wget -O {output.db} https://www2.decipher.codes/data/Downloads/TrainingSets/SILVA_SSU_r138_2019.RData >{log} 2>&1
         """
 
 # 16S rRNA gene taxonomic classification to compare to the whole genome classification
