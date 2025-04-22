@@ -4,8 +4,8 @@ channels:
   - bioconda
 dependencies:
   - conda-forge::r-tidyverse=2.0.0
-  - conda-forge::r-base=4.3.3
-  - conda-forge::r-fs==1.6.4
-  - conda-forge::r-tinytable==0.4.0
-  - conda-forge::r-markdown==1.13
-  - bioconda::bioconductor-decipher==2.30.0
+  - conda-forge::r-base=4.4.3
+  - conda-forge::r-fs==1.6.6
+  - conda-forge::r-tinytable==0.8.0
+  - conda-forge::r-markdown==2.0
+  - bioconda::bioconductor-decipher==3.2.0

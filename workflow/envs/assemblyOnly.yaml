@@ -3,8 +3,8 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - bioconda::checkm2==1.0.1
-  - bioconda::seqkit==2.8.2
-  - bioconda::gtdbtk==2.4.0
+  - bioconda::checkm2==1.1.0
+  - bioconda::seqkit==2.10.0
+  - bioconda::gtdbtk==2.4.1
   - bioconda::infernal==1.1.5
   - bioconda::trnascan-se==2.0.12

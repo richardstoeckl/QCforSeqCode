@@ -7,6 +7,7 @@ library(tidyverse)
 library(fs)
 library(tinytable)
 library(markdown)
+options("tinytable_html_portable" = TRUE)
 
 # R rounds 0.5 to the nearest even number (e.g. 11.5 -> 12; but 12.5 -> 12), which is not intuitive for most people. 
 # This function rounds 0.5 to the nearest higher number. This could influence downstream statistics on the rounded numbers,

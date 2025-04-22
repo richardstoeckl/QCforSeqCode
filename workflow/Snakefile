@@ -209,6 +209,7 @@ rule downloadDecipherDB:
         db=os.path.join(INTERIMPATH,"DECIPHER", "SILVA_SSU_r138_2019.RData"),
     log:
         os.path.join(LOGPATH, "common", "logs", "downloadDecipherDB.log"),
+    retries: 3
     shell:
         """
         wget -O {output.db} https://www2.decipher.codes/data/Downloads/TrainingSets/SILVA_SSU_r138_2019.RData >{log} 2>&1
