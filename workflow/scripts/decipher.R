@@ -23,7 +23,11 @@ load(trainingData)
 fasta <- readDNAStringSet(fastaPath)
 
 # assign taxonomic classifiction
-taxonomy <- IdTaxa(fasta, training = trainingSet, processors = as.numeric(threads), type= "extended")
+taxonomy <- if (length(fasta) > 0) {
+    IdTaxa(fasta, training = trainingSet, processors = as.numeric(threads), type= "extended")
+} else {
+    list()
+}
 
 # Initialize an empty list to store the results
 results_list <- list()
@@ -42,7 +46,10 @@ for (i in seq_along(taxonomy)) {
 }
 
 # Combine all tibbles into a single dataframe
-final_dataframe <- bind_rows(results_list)
+final_dataframe <- bind_rows(
+    results_list,
+    tibble(sample = character(), family = character(), genus = character())
+)
 
 write_tsv(final_dataframe, outPath)
 

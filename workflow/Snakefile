@@ -74,7 +74,8 @@ rule collectAssemblies:
 # check completeness, contamination, and also N50
 rule checkm2:
     input:
-        assembly=expand(rules.collectAssemblies.output, sampleID=SAMPLES)
+        assembly=expand(rules.collectAssemblies.output, sampleID=SAMPLES),
+        samples=sampleData,
     output:
         os.path.join(RESULTPATH,"checkm2","quality_report.tsv")
     log:
@@ -86,22 +87,33 @@ rule checkm2:
     params:
         dbpath=os.path.join(config["tools"]["checkm2"]["dbpath"], "uniref100.KO.1.dmnd"),
         outDir=lambda w, output:os.path.split(os.path.splitext(output[0])[0])[0],
-        genomeDir=lambda w, input:os.path.split(os.path.splitext(input[0])[0])[0]
     shell:
         """
-        checkm2 predict -i {params.genomeDir} -o {params.outDir} --database_path {params.dbpath} -x '.fasta' --force -t {threads} >{log} 2>&1
+        checkm2 predict -i {input.assembly:q} -o {params.outDir} --database_path {params.dbpath} --force -t {threads} >{log} 2>&1
         """
+
+# List only the current samples; old collected assemblies may still be on disk.
+rule gtdbtkBatch:
+    input:
+        samples=sampleData,
+        assemblies=expand(rules.collectAssemblies.output.assemblyCollected, sampleID=SAMPLES),
+    output:
+        os.path.join(INTERIMPATH, "gtdbtk_batch.tsv"),
+    run:
+        with open(output[0], "w") as batch:
+            for sample, assembly in zip(SAMPLES, input.assemblies):
+                batch.write(f"{os.path.abspath(assembly)}\t{sample}\n")
 
 # whole genome taxonomic classification
 rule gtdbtk:
     input:
-        assembliesCollected=expand(rules.collectAssemblies.output, sampleID=SAMPLES)
+        assembliesCollected=expand(rules.collectAssemblies.output, sampleID=SAMPLES),
+        batch=rules.gtdbtkBatch.output,
     output:
         directory(os.path.join(INTERIMPATH,"gtdbtk")),
     log:
         os.path.join(LOGPATH, "common", "logs", "gtdbtk.log"),
     params:
-        inputDir=lambda w, input:os.path.split(os.path.splitext(input[0])[0])[0],
         dbpath=os.path.join(config["tools"]["gtdbtk"]["dbpath"]),
     retries: 2 # this is necessary because the conda env var needs to be set
     conda:
@@ -109,7 +121,7 @@ rule gtdbtk:
     shell:
         """
         conda env config vars set GTDBTK_DATA_PATH={params.dbpath}
-        gtdbtk classify_wf --cpus {threads} --skip_ani_screen --force --genome_dir {params.inputDir} --extension 'fasta' --out_dir {output} >{log} 2>&1
+        gtdbtk classify_wf --cpus {threads} --place_species --force --batchfile {input.batch:q} --out_dir {output} >{log} 2>&1
         """
 
 # helper function to get all of the gtdbtk classification files, as they might be split between archaea and bacteria
@@ -177,17 +189,26 @@ rule infernal:
     conda:
         os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
     shell:
-        # first, use infernals cmscan to find the 16S rRNA gene
-        # then format the cmscan output using awk:
-        # 1. remove all lines starting with #
-        # 2. only keep lines where the 20th column (the “olp” or "overlap" column) is "="
-        # 3. convert to bed format but if the strand is "-", switch the seq from and seq to columns
-        # 4. sort by score in descending order and get the top hit
-        # finally, use seqkit to extract the sequence from the assembly
-        """
-        cmscan --noali --cut_tc -g --fmt 2 --nohmmonly --rfam --cpu {threads} --tblout {output.tblout} {input.prepare16SrRNAdb} {input.assembly} >{log} 2>&1
-        awk '!/^#/ && $20 == "=" {{print}}' {output.tblout}  | awk 'BEGIN{{OFS="\t"}} {{if ($12 == "-") {{print $4, $11, $10, $2, $17, $12}} else {{print $4, $10, $11, $2, $17, $12}}}}' | sort -k5,5nr | head -n 1 > {output.bed}
-        seqkit subseq --bed {output.bed} {input.assembly} | seqkit replace -p .+ -r "{wildcards.sampleID}" > {output.rRNAFasta}
+        # Infernal removes inferior overlaps; select the best remaining hit.
+        # Convert 1-based inclusive coordinates to BED on either strand.
+        r"""
+        cmscan --noali --cut_tc -g --fmt 2 --oskip --nohmmonly --rfam --cpu {threads} --tblout {output.tblout:q} {input.prepare16SrRNAdb:q} {input.assembly:q} >{log:q} 2>&1
+        awk '
+        BEGIN {{ OFS="\t" }}
+        !/^#/ && NF && (!found || $17 > best) {{
+            found = 1
+            best = $17
+            start = ($10 < $11 ? $10 : $11) - 1
+            end = ($10 > $11 ? $10 : $11)
+            hit = $4 OFS start OFS end OFS $2 OFS $17 OFS $12
+        }}
+        END {{ if (found) print hit }}
+        ' {output.tblout:q} > {output.bed:q}
+        if [ -s {output.bed:q} ]; then
+            seqkit subseq --bed {output.bed:q} {input.assembly:q} | seqkit replace -p .+ -r "{wildcards.sampleID}" > {output.rRNAFasta:q}
+        else
+            : > {output.rRNAFasta:q}
+        fi
         """
 
 # helper function to concatenate all 16S rRNA gene sequences into one fasta file
@@ -206,13 +227,15 @@ rule concatFasta:
 # get the training data for decipher
 rule downloadDecipherDB:
     output:
-        db=os.path.join(INTERIMPATH,"DECIPHER", "SILVA_SSU_r138_2019.RData"),
+        db=os.path.join(INTERIMPATH,"DECIPHER", "SILVA_SSU_r138.2_v2.RData"),
     log:
         os.path.join(LOGPATH, "common", "logs", "downloadDecipherDB.log"),
     retries: 3
+    conda:
+        os.path.join(workflow.basedir, "envs","assemblyOnly.yaml")
     shell:
         """
-        wget -O {output.db} https://www2.decipher.codes/data/Downloads/TrainingSets/SILVA_SSU_r138_2019.RData >{log} 2>&1
+        gdown "1w3wdSCpSihntWkbP_zvXz7r3s-tNB8DV" -O {output.db:q} >{log:q} 2>&1
         """
 
 # 16S rRNA gene taxonomic classification to compare to the whole genome classification
@@ -308,14 +331,15 @@ rule minimap:
     shell:
         """
         minimap2 -t {threads} -ax {params.mappingMode} {input.assembly} {input.reads} 2>{log} | \
-        samtools view -@ {threads}/2 -b 2>>{log} | \
-        samtools sort -@ {threads}/2 > {output.bam} 2>>{log} && \
+        samtools view -@ $(( {threads} / 2 )) -b 2>>{log} | \
+        samtools sort -@ $(( {threads} / 2 )) > {output.bam} 2>>{log} && \
         samtools index {output.bam} 2>>{log} && \
         samtools coverage -d 0 {output.bam} > {output.coverage} 2>>{log}
         """
 
 rule createReport:
     input:
+        samples=sampleData,
         checkm2=rules.checkm2.output,
         seqkit_stats=expand(rules.seqkit_stats.output, sampleID=SAMPLES),
         gtdbtk=rules.collectGtdbtk.output,
@@ -339,5 +363,5 @@ rule createReport:
         os.path.join(workflow.basedir, "envs","r-tools.yaml")
     shell:
         """
-        Rscript {params.script} {input.checkm2} {params.seqkit_stats_dir} {params.samtools_coverage_dir} {input.gtdbtk} {input.decipher} {params.tRNAscan_dir} {output.reportHTML} {output.reportTSV} >{log} 2>&1
+        Rscript {params.script} {input.checkm2} {params.seqkit_stats_dir} {params.samtools_coverage_dir} {input.gtdbtk} {input.decipher} {params.tRNAscan_dir} {output.reportHTML} {output.reportTSV} {input.samples:q} >{log} 2>&1
         """

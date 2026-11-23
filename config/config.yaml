@@ -9,6 +9,6 @@ tools:
     checkm2:
         dbpath: /path/to/CheckM2_database/ # path to the db, downloaded with 'wget https://zenodo.org/records/14897628/files/checkm2_database.tar.gz'
     gtdbtk:
-        dbpath: /path/to/GTDB-Tk_release226/  # path to the db, downloaded with 'wget https://data.gtdb.ecogenomic.org/releases/release226/226.0/auxillary_files/gtdbtk_package/full_package/gtdbtk_r226_data.tar.gz'
+        dbpath: /path/to/GTDB-Tk_release232/  # path to the db, downloaded with 'wget https://data.gtdb.ecogenomic.org/releases/release232/232.0/auxillary_files/gtdbtk_package/full_package/gtdbtk_r232_data.tar.gz'
     infernal:
         dbpath: infernal/ # path where the Rfam 16S rRNA db will be created

@@ -4,7 +4,8 @@ channels:
   - bioconda
 dependencies:
   - bioconda::checkm2==1.1.0
-  - bioconda::seqkit==2.10.0
-  - bioconda::gtdbtk==2.4.1
+  - bioconda::seqkit==2.14.0
+  - bioconda::gtdbtk==2.8.0
   - bioconda::infernal==1.1.5
-  - bioconda::trnascan-se==2.0.12
+  - bioconda::trnascan-se==2.0.13
+  - conda-forge::gdown==6.5.2
