@@ -113,6 +113,8 @@ rule gtdbtk:
         directory(os.path.join(INTERIMPATH,"gtdbtk")),
     log:
         os.path.join(LOGPATH, "common", "logs", "gtdbtk.log"),
+    threads:
+        workflow.cores
     params:
         dbpath=os.path.join(config["tools"]["gtdbtk"]["dbpath"]),
     retries: 2 # this is necessary because the conda env var needs to be set
